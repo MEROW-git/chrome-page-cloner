@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Website Study Analyzer</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+        </svg>
+      </div>
+      <div class="header-text">
+        <h1 class="header-title">Website Study Analyzer</h1>
+        <p class="header-subtitle">Educational frontend analysis</p>
+      </div>
+    </header>
+
+    <!-- Status -->
+    <div id="status" class="status">
+      <div class="spinner" aria-hidden="true"></div>
+      <span class="status-text">Analyzing page...</span>
+    </div>
+
+    <!-- Results -->
+    <main id="results" class="results hidden">
+      <!-- Page Info -->
+      <section class="section">
+        <h2 class="section-title">Page Overview</h2>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Title</span>
+            <span id="page-title" class="info-value truncate">—</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Host</span>
+            <span id="page-host" class="info-value truncate">—</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Elements</span>
+            <span id="element-count" class="info-value">—</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Colors -->
+      <section class="section">
+        <h2 class="section-title">
+          Color Palette
+          <span id="color-count" class="badge">0</span>
+        </h2>
+        <div id="color-list" class="color-grid"></div>
+      </section>
+
+      <!-- Fonts -->
+      <section class="section">
+        <h2 class="section-title">
+          Typography
+          <span id="font-count" class="badge">0</span>
+        </h2>
+        <div id="font-list" class="font-list"></div>
+      </section>
+
+      <!-- Spacing -->
+      <section class="section">
+        <h2 class="section-title">
+          Spacing Patterns
+          <span id="spacing-count" class="badge">0</span>
+        </h2>
+        <div id="spacing-list" class="spacing-list"></div>
+      </section>
+
+      <!-- DOM Preview -->
+      <section class="section">
+        <h2 class="section-title">DOM Tree Preview</h2>
+        <div id="dom-preview" class="dom-tree"></div>
+      </section>
+
+      <!-- Actions -->
+      <section class="section actions">
+        <button id="btn-export" class="btn btn-primary" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Export JSON
+        </button>
+        <button id="btn-clone" class="btn btn-secondary" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="8" y="8" width="12" height="12" rx="2" ry="2"/>
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+          </svg>
+          Clone Website
+        </button>
+      </section>
+    </main>
+
+    <!-- Error State -->
+    <div id="error" class="error hidden">
+      <div class="error-icon" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <p id="error-text" class="error-text">Something went wrong.</p>
+      <button id="btn-retry" class="btn btn-primary" type="button">Retry</button>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>All data stays local in your browser.</p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
