@@ -342,13 +342,27 @@
     });
   }
 
-  function copyComputedStyles(sourceRoot, cloneRoot) {
+  function getFileExtension(url, fallback) {
+    try {
+      const path = new URL(url, window.location.href).pathname;
+      const match = path.match(/\.([a-z0-9]{2,8})$/i);
+      return match ? match[1].toLowerCase() : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function collectComputedCss(sourceRoot, cloneRoot, registerAsset) {
     const sourceElements = [sourceRoot, ...sourceRoot.querySelectorAll('*')];
     const cloneElements = [cloneRoot, ...cloneRoot.querySelectorAll('*')];
+    const rules = [];
 
     sourceElements.forEach((sourceEl, index) => {
       const cloneEl = cloneElements[index];
       if (!cloneEl || !sourceEl.getBoundingClientRect) return;
+
+      const cloneId = `wsa-${index}`;
+      cloneEl.setAttribute('data-wsa-id', cloneId);
 
       const computed = getComputedStyle(sourceEl);
       const styleText = CLONE_INLINE_PROPS
@@ -356,14 +370,23 @@
           const cssProp = prop.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
           let value = computed[prop];
           if (!value) return '';
-          if (prop === 'backgroundImage') value = absolutizeCssUrls(value);
+          if (prop === 'backgroundImage') {
+            value = absolutizeCssUrls(value).replace(/url\("([^"]+)"\)/g, (match, url) => {
+              const localPath = registerAsset(url, 'assets', getFileExtension(url, 'bin'));
+              return `url("../${localPath}")`;
+            });
+          }
           return `${cssProp}:${value}`;
         })
         .filter(Boolean)
         .join(';');
 
-      cloneEl.setAttribute('style', styleText);
+      if (styleText) {
+        rules.push(`[data-wsa-id="${cloneId}"]{${styleText}}`);
+      }
     });
+
+    return rules.join('\n');
   }
 
   function sanitizeClone(doc) {
@@ -390,12 +413,22 @@
     });
   }
 
-  function fixAssetUrls(doc) {
-    doc.querySelectorAll('[src]').forEach((el) => {
-      const src = el.getAttribute('src');
-      if (src) el.setAttribute('src', absoluteUrl(src));
-    });
+  function rewriteSrcset(value, registerAsset) {
+    if (!value) return value;
+    return value
+      .split(',')
+      .map((part) => {
+        const pieces = part.trim().split(/\s+/);
+        if (!pieces[0]) return '';
+        const url = absoluteUrl(pieces[0]);
+        pieces[0] = registerAsset(url, 'assets', getFileExtension(url, 'bin'));
+        return pieces.join(' ');
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
 
+  function rewriteDocumentAssets(doc, registerAsset) {
     doc.querySelectorAll('[href]').forEach((el) => {
       const href = el.getAttribute('href');
       if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
@@ -403,27 +436,70 @@
       }
     });
 
+    doc.querySelectorAll('link[rel~="stylesheet"][href]').forEach((link, index) => {
+      const url = absoluteUrl(link.getAttribute('href'));
+      const path = registerAsset(url, 'styles', 'css', `stylesheet-${index + 1}`);
+      link.setAttribute('href', path);
+    });
+
+    doc.querySelectorAll('img, video, audio, source, track, embed').forEach((el) => {
+      const src = el.currentSrc || el.src || el.getAttribute('src') || el.getAttribute('data-src') || el.getAttribute('data-lazy-src');
+      if (src) {
+        el.setAttribute('src', registerAsset(absoluteUrl(src), 'assets', getFileExtension(src, 'bin')));
+      }
+    });
+
     doc.querySelectorAll('[srcset]').forEach((el) => {
-      el.setAttribute('srcset', absoluteSrcset(el.getAttribute('srcset')));
+      el.setAttribute('srcset', rewriteSrcset(el.getAttribute('srcset'), registerAsset));
     });
 
     doc.querySelectorAll('img').forEach((img) => {
-      const source = img.currentSrc || img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
-      if (source) img.setAttribute('src', absoluteUrl(source));
       img.removeAttribute('loading');
     });
+
+    doc.querySelectorAll('head style, body style').forEach((style, index) => {
+      const link = doc.createElement('link');
+      link.setAttribute('rel', 'stylesheet');
+      link.setAttribute('href', `styles/inline-style-${index + 1}.css`);
+      style.replaceWith(link);
+    });
+
   }
 
   function buildStaticClone() {
     try {
+      const remoteFiles = new Map();
+      const inlineFiles = [];
+
+      function registerAsset(url, folder, fallbackExt, preferredName) {
+        if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
+        const absolute = absoluteUrl(url);
+        if (remoteFiles.has(absolute)) return remoteFiles.get(absolute).path;
+
+        const index = remoteFiles.size + 1;
+        const ext = getFileExtension(absolute, fallbackExt || 'bin');
+        const base = preferredName || `file-${index}`;
+        const path = `${folder}/${base}.${ext}`.replace(/[^a-zA-Z0-9._/-]/g, '-');
+        remoteFiles.set(absolute, { path, url: absolute });
+        return path;
+      }
+
       const clonedDocument = document.implementation.createHTMLDocument(document.title || 'Cloned Website');
       const clonedElement = document.documentElement.cloneNode(true);
-      copyComputedStyles(document.documentElement, clonedElement);
+      const computedCss = collectComputedCss(document.documentElement, clonedElement, registerAsset);
 
       const importedElement = clonedDocument.importNode(clonedElement, true);
       clonedDocument.replaceChild(importedElement, clonedDocument.documentElement);
       sanitizeClone(clonedDocument);
-      fixAssetUrls(clonedDocument);
+
+      Array.from(document.querySelectorAll('head style, body style')).forEach((style, index) => {
+        inlineFiles.push({
+          path: `styles/inline-style-${index + 1}.css`,
+          content: style.textContent || '',
+        });
+      });
+
+      rewriteDocumentAssets(clonedDocument, registerAsset);
 
       let head = clonedDocument.head;
       if (!head) {
@@ -431,25 +507,34 @@
         clonedDocument.documentElement.insertBefore(head, clonedDocument.body || null);
       }
 
-      const base = clonedDocument.createElement('base');
-      base.setAttribute('href', window.location.href);
-      head.insertBefore(base, head.firstChild);
-
       const meta = clonedDocument.createElement('meta');
       meta.setAttribute('name', 'website-study-analyzer');
       meta.setAttribute('content', `Static local clone generated from ${window.location.href}`);
       head.appendChild(meta);
 
-      const guardStyle = clonedDocument.createElement('style');
-      guardStyle.textContent = `
+      const computedLink = clonedDocument.createElement('link');
+      computedLink.setAttribute('rel', 'stylesheet');
+      computedLink.setAttribute('href', 'styles/computed.css');
+      head.appendChild(computedLink);
+
+      inlineFiles.push({
+        path: 'styles/computed.css',
+        content: `${computedCss}
         form[data-cloned-static-form] { pointer-events: none; }
         input:disabled, textarea:disabled, select:disabled, button:disabled { opacity: 1; }
-      `;
-      head.appendChild(guardStyle);
+      `,
+      });
 
       return {
         success: true,
         html: '<!DOCTYPE html>\n' + clonedDocument.documentElement.outerHTML,
+        files: [
+          ...inlineFiles,
+          ...Array.from(remoteFiles.values()).map((file) => ({
+            path: file.path,
+            url: file.url,
+          })),
+        ],
       };
     } catch (err) {
       return {

@@ -10,7 +10,7 @@ A Chrome Extension for ethical frontend study. Analyzes pages you have permissio
 - **Design Token Detection** — Automatically extracts color palettes, typography scales, and spacing patterns
 - **Popup UI** — Clean, fast interface showing page overview, colors, fonts, spacing, and DOM preview
 - **Export JSON** — Download structured analysis data for offline study
-- **Clone Website** — Download a static local HTML snapshot of the current page, preserving real DOM, text, images, links, and computed styles where possible
+- **Clone Website** — Download a ZIP package with `index.html`, CSS files, and detected image/media assets where possible
 
 ## Privacy & Security
 
@@ -19,7 +19,7 @@ This extension is built with privacy as a core principle:
 - **No external network requests** — All processing is local
 - **No data collection** — No cookies, passwords, tokens, or auth data is accessed
 - **No storage access** — Does not read localStorage, sessionStorage, or hidden form values
-- **Static snapshots only** — Scripts are removed and forms are disabled in cloned pages
+- **Local ZIP output** — The clone is saved as a local project folder inside a ZIP file
 - **Ethical by design** — Creates local study snapshots; respect site terms and copyright
 
 ## Installation
@@ -57,7 +57,7 @@ website-study-analyzer/
 3. The popup will automatically analyze the page
 4. Review the detected colors, fonts, spacing patterns, and DOM structure
 5. Click **Export JSON** to download the raw analysis data
-6. Click **Clone Website** to download a static HTML snapshot for educational reference
+6. Click **Clone Website** to download a ZIP containing `index.html`, `styles/`, and `assets/`
 
 ## Testing Steps
 
@@ -73,7 +73,7 @@ website-study-analyzer/
    - Spacing patterns
    - Collapsible DOM tree preview
 4. **Click "Export JSON"** — a save dialog should appear; save and verify the JSON contains the expected structure
-5. **Click "Clone Website"** — save the HTML file, open it in a browser, and verify it shows a static visual snapshot of the current page
+5. **Click "Clone Website"** — save the ZIP, extract it, open `index.html`, and verify it shows the cloned page with separate CSS and assets folders
 
 ### Error Handling
 
@@ -98,10 +98,10 @@ website-study-analyzer/
 - **iframes not analyzed** — Content inside cross-origin iframes is inaccessible; same-origin iframes are skipped by design
 - **Dynamic content** — Content loaded after initial page load (infinite scroll, lazy loading) may not be captured
 - **Color accuracy** — Colors are converted to hex where possible; some CSS color values may remain in original format
-- **Clone is static** — JavaScript is removed, forms are disabled, and dynamic app behavior will not run in the downloaded file
-- **Asset availability depends on URLs** — The cloned HTML points to original image, stylesheet, and font URLs; assets may not load offline or if a site blocks direct access
+- **Clone is visual/static** — JavaScript is removed so cloned pages stay lighter and do not run broken original-site behavior
+- **Asset availability depends on browser access** — Some CSS, JS, image, font, or media files may fail to download if a site blocks direct extension access
 - **Chrome only** — This extension uses Manifest V3 APIs specific to Chromium-based browsers
-- **No font file extraction** — Font names are detected but font files are never downloaded
+- **CSS URL dependencies** — URLs inside downloaded CSS are rewritten to absolute URLs; deeply nested CSS assets may still load from the original site
 
 ## Permissions Used
 
@@ -109,7 +109,7 @@ website-study-analyzer/
 |------------|---------|
 | `activeTab` | Access the currently active tab when the user clicks the extension icon |
 | `scripting` | Inject the content analysis script into the active tab |
-| `downloads` | Save exported JSON and generated clone HTML files to your computer |
+| `downloads` | Save exported JSON and generated clone ZIP files to your computer |
 | `<all_urls>` | Allow analysis of any URL the user navigates to (required for content script registration) |
 
 ## Development

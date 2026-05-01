@@ -14,6 +14,7 @@
   const $btnRetry = document.getElementById('btn-retry');
   const $btnExport = document.getElementById('btn-export');
   const $btnClone = document.getElementById('btn-clone');
+  const $btnTheme = document.getElementById('btn-theme');
 
   const $pageTitle = document.getElementById('page-title');
   const $pageHost = document.getElementById('page-host');
@@ -31,10 +32,74 @@
 
   // --- Initialization ---
   function init() {
+    initTheme();
+    initCollapsibleSections();
     $btnRetry.addEventListener('click', runAnalysis);
     $btnExport.addEventListener('click', exportJSON);
     $btnClone.addEventListener('click', cloneWebsite);
     runAnalysis();
+  }
+
+  function initTheme() {
+    const savedTheme = localStorage.getItem('wsa-theme') || 'light';
+    applyTheme(savedTheme);
+
+    $btnTheme.addEventListener('click', () => {
+      const nextTheme = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(nextTheme);
+      localStorage.setItem('wsa-theme', nextTheme);
+    });
+  }
+
+  function applyTheme(theme) {
+    document.body.dataset.theme = theme;
+    const isDark = theme === 'dark';
+    $btnTheme.textContent = isDark ? 'Light' : 'Dark';
+    $btnTheme.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+  }
+
+  function initCollapsibleSections() {
+    document.querySelectorAll('.section:not(.actions)').forEach((section, index) => {
+      const title = section.querySelector('.section-title');
+      if (!title) return;
+
+      const contentId = `section-content-${index}`;
+      const toggle = document.createElement('button');
+      toggle.className = 'section-toggle';
+      toggle.type = 'button';
+      toggle.textContent = '-';
+      toggle.setAttribute('aria-label', 'Minimize section');
+
+      title.setAttribute('role', 'button');
+      title.setAttribute('tabindex', '0');
+      title.setAttribute('aria-expanded', 'true');
+      title.setAttribute('aria-controls', contentId);
+      title.appendChild(toggle);
+
+      const content = document.createElement('div');
+      content.className = 'section-content';
+      content.id = contentId;
+
+      Array.from(section.children).forEach((child) => {
+        if (child !== title) content.appendChild(child);
+      });
+      section.appendChild(content);
+
+      const toggleSection = () => {
+        const collapsed = section.classList.toggle('collapsed');
+        title.setAttribute('aria-expanded', String(!collapsed));
+        toggle.textContent = collapsed ? '+' : '-';
+        toggle.setAttribute('aria-label', collapsed ? 'Expand section' : 'Minimize section');
+      };
+
+      title.addEventListener('click', toggleSection);
+      title.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggleSection();
+        }
+      });
+    });
   }
 
   // --- Analysis Flow ---
@@ -318,6 +383,7 @@
     const originalHTML = $btnClone.innerHTML;
     $btnClone.disabled = true;
     $btnClone.style.opacity = '0.7';
+    setCloneButtonBusy('Cloning page...');
 
     try {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -333,11 +399,18 @@
         throw new Error(response?.error || 'Could not clone this page.');
       }
 
-      const blob = new Blob([response.html], { type: 'text/html' });
+      setCloneButtonBusy('Downloading files...');
+      const files = await collectCloneFiles(response, (current, total) => {
+        setCloneButtonBusy(`Downloading ${current}/${total}`);
+      });
+
+      setCloneButtonBusy('Building ZIP...');
+      const blob = createZipBlob(files);
       const url = URL.createObjectURL(blob);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `website-clone-${analysisData.meta?.hostname || 'page'}-${timestamp}.html`;
+      const filename = `website-clone-${analysisData.meta?.hostname || 'page'}-${timestamp}.zip`;
 
+      setCloneButtonBusy('Saving ZIP...');
       chrome.downloads.download({
         url: url,
         filename: filename,
@@ -534,6 +607,193 @@ ${colorClasses}
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
+
+  function setCloneButtonBusy(message) {
+    $btnClone.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span><span>${message}</span>`;
+  }
+
+  async function collectCloneFiles(response, onProgress) {
+    const files = [
+      { path: 'index.html', content: response.html },
+      {
+        path: 'README.txt',
+        content: [
+          'Website Study Analyzer clone package',
+          '',
+          'Open index.html to view the cloned page.',
+          'This clone is visual/static: JavaScript is removed to keep the page lighter and avoid broken original-site runtime behavior.',
+        ].join('\n'),
+      },
+    ];
+    const warnings = [];
+    const remoteFiles = response.files || [];
+    const maxFileBytes = 25 * 1024 * 1024;
+    let processed = 0;
+
+    for (const file of remoteFiles) {
+      processed++;
+      onProgress?.(processed, remoteFiles.length);
+
+      if (file.content != null) {
+        files.push({ path: file.path, content: file.content });
+        continue;
+      }
+
+      if (!file.url) continue;
+
+      try {
+        const fetched = await fetch(file.url, { credentials: 'omit' });
+        if (!fetched.ok) {
+          throw new Error(`HTTP ${fetched.status}`);
+        }
+
+        if (file.path.toLowerCase().endsWith('.css')) {
+          const css = await fetched.text();
+          files.push({ path: file.path, content: rewriteCssResourceUrls(css, file.url) });
+          continue;
+        }
+
+        const buffer = await fetched.arrayBuffer();
+        if (buffer.byteLength > maxFileBytes) {
+          warnings.push(`Skipped large file (${buffer.byteLength} bytes): ${file.url}`);
+          continue;
+        }
+
+        files.push({ path: file.path, data: new Uint8Array(buffer) });
+      } catch (err) {
+        warnings.push(`Could not download ${file.url}: ${err?.message || 'unknown error'}`);
+      }
+    }
+
+    if (warnings.length) {
+      files.push({
+        path: 'CLONE_WARNINGS.txt',
+        content: warnings.join('\n'),
+      });
+    }
+
+    return files;
+  }
+
+  function rewriteCssResourceUrls(css, baseUrl) {
+    return css.replace(/url\((['"]?)(.*?)\1\)/g, (match, quote, url) => {
+      const trimmed = url.trim();
+      if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('#')) {
+        return match;
+      }
+
+      try {
+        return `url("${new URL(trimmed, baseUrl).href}")`;
+      } catch (err) {
+        return match;
+      }
+    });
+  }
+
+  function createZipBlob(files) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    files.forEach((file) => {
+      const name = normalizeZipPath(file.path);
+      const nameBytes = encoder.encode(name);
+      const data = file.data || encoder.encode(file.content || '');
+      const crc = crc32(data);
+      const { time, date } = dosDateTime(new Date());
+
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      const local = new DataView(localHeader.buffer);
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, 0, true);
+      local.setUint16(8, 0, true);
+      local.setUint16(10, time, true);
+      local.setUint16(12, date, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, data.length, true);
+      local.setUint32(22, data.length, true);
+      local.setUint16(26, nameBytes.length, true);
+      local.setUint16(28, 0, true);
+      localHeader.set(nameBytes, 30);
+
+      localParts.push(localHeader, data);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      const central = new DataView(centralHeader.buffer);
+      central.setUint32(0, 0x02014b50, true);
+      central.setUint16(4, 20, true);
+      central.setUint16(6, 20, true);
+      central.setUint16(8, 0, true);
+      central.setUint16(10, 0, true);
+      central.setUint16(12, time, true);
+      central.setUint16(14, date, true);
+      central.setUint32(16, crc, true);
+      central.setUint32(20, data.length, true);
+      central.setUint32(24, data.length, true);
+      central.setUint16(28, nameBytes.length, true);
+      central.setUint16(30, 0, true);
+      central.setUint16(32, 0, true);
+      central.setUint16(34, 0, true);
+      central.setUint16(36, 0, true);
+      central.setUint32(38, 0, true);
+      central.setUint32(42, offset, true);
+      centralHeader.set(nameBytes, 46);
+
+      centralParts.push(centralHeader);
+      offset += localHeader.length + data.length;
+    });
+
+    const centralOffset = offset;
+    const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+    const endRecord = new Uint8Array(22);
+    const end = new DataView(endRecord.buffer);
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(4, 0, true);
+    end.setUint16(6, 0, true);
+    end.setUint16(8, files.length, true);
+    end.setUint16(10, files.length, true);
+    end.setUint32(12, centralSize, true);
+    end.setUint32(16, centralOffset, true);
+    end.setUint16(20, 0, true);
+
+    return new Blob([...localParts, ...centralParts, endRecord], { type: 'application/zip' });
+  }
+
+  function normalizeZipPath(path) {
+    return String(path || 'file.txt')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\.\.+/g, '.');
+  }
+
+  function dosDateTime(date) {
+    const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+    const year = Math.max(date.getFullYear(), 1980);
+    const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    return { time, date: dosDate };
+  }
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) {
+      crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  const CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) {
+        c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[i] = c >>> 0;
+    }
+    return table;
+  })();
 
   // --- View State Management ---
   function showStatus() {
